@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { QrCode, Camera, CheckCircle, XCircle, Clock } from "lucide-react"
+import { QrCode, Camera, CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react"
 import { mockInstruments, mockQualifications, mockUsageRecords } from "@/lib/mock-data"
 import { useAppStore } from "@/lib/store"
 import { useToast } from "@/hooks/use-toast"
+import { scanQRCode, initWeChatSDK, getWeChatConfig, isWeChatBrowser } from "@/lib/wechat-sdk"
 
 type ScanStatus = "idle" | "scanning" | "success" | "error"
 
@@ -16,19 +17,56 @@ export function ScanInterface() {
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle")
   const [scannedInstrument, setScannedInstrument] = useState<(typeof mockInstruments)[0] | null>(null)
   const [action, setAction] = useState<"check-in" | "check-out" | null>(null)
+  const [isWeChatEnv, setIsWeChatEnv] = useState(false)
+  const [sdkReady, setSdkReady] = useState(false)
 
-  // 模拟扫码
-  const handleScan = (scanAction: "check-in" | "check-out") => {
+  useEffect(() => {
+    const checkWeChatAndInit = async () => {
+      const inWeChat = isWeChatBrowser()
+      setIsWeChatEnv(inWeChat)
+
+      if (inWeChat) {
+        try {
+          const config = await getWeChatConfig()
+          await initWeChatSDK(config)
+          setSdkReady(true)
+        } catch (error) {
+          console.error("[v0] 微信SDK初始化失败:", error)
+          toast({
+            title: "初始化失败",
+            description: "微信SDK初始化失败，将使用模拟扫码",
+            variant: "destructive",
+          })
+        }
+      }
+    }
+
+    checkWeChatAndInit()
+  }, [toast])
+
+  const handleWeChatScan = async (scanAction: "check-in" | "check-out") => {
     setScanStatus("scanning")
     setAction(scanAction)
 
-    // 模拟扫码过程
-    setTimeout(() => {
-      // 随机选择一个仪器
-      const instrument = mockInstruments[0]
+    try {
+      const qrCodeResult = await scanQRCode()
+      console.log("[v0] 扫码结果:", qrCodeResult)
+
+      const instrumentId = qrCodeResult.replace("instrument_id_", "")
+      const instrument = mockInstruments.find((i) => i.id === instrumentId)
+
+      if (!instrument) {
+        setScanStatus("error")
+        toast({
+          title: "扫码失败",
+          description: "未找到对应的仪器信息",
+          variant: "destructive",
+        })
+        return
+      }
+
       setScannedInstrument(instrument)
 
-      // 检查权限
       const hasQualification = mockQualifications.some(
         (q) => q.userId === user?.id && q.instrumentId === instrument.id && q.status === "approved",
       )
@@ -43,7 +81,68 @@ export function ScanInterface() {
         return
       }
 
-      // 检查是否有进行中的使用记录
+      const activeUsage = mockUsageRecords.find(
+        (r) => r.userId === user?.id && r.instrumentId === instrument.id && r.status === "in-progress",
+      )
+
+      if (scanAction === "check-in" && activeUsage) {
+        setScanStatus("error")
+        toast({
+          title: "上机失败",
+          description: "您已经在使用该仪器",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (scanAction === "check-out" && !activeUsage) {
+        setScanStatus("error")
+        toast({
+          title: "下机失败",
+          description: "未找到使用记录",
+          variant: "destructive",
+        })
+        return
+      }
+
+      setScanStatus("success")
+      toast({
+        title: scanAction === "check-in" ? "上机成功" : "下机成功",
+        description: `${instrument.name} - ${scanAction === "check-in" ? "开始使用" : "使用结束"}`,
+      })
+    } catch (error) {
+      console.error("[v0] 扫码错误:", error)
+      setScanStatus("error")
+      toast({
+        title: "扫码失败",
+        description: "扫码过程中出现错误，请重试",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleMockScan = (scanAction: "check-in" | "check-out") => {
+    setScanStatus("scanning")
+    setAction(scanAction)
+
+    setTimeout(() => {
+      const instrument = mockInstruments[0]
+      setScannedInstrument(instrument)
+
+      const hasQualification = mockQualifications.some(
+        (q) => q.userId === user?.id && q.instrumentId === instrument.id && q.status === "approved",
+      )
+
+      if (!hasQualification && instrument.requiresQualification) {
+        setScanStatus("error")
+        toast({
+          title: "权限不足",
+          description: "您没有该仪器的使用资质",
+          variant: "destructive",
+        })
+        return
+      }
+
       const activeUsage = mockUsageRecords.find(
         (r) => r.userId === user?.id && r.instrumentId === instrument.id && r.status === "in-progress",
       )
@@ -76,6 +175,14 @@ export function ScanInterface() {
     }, 2000)
   }
 
+  const handleScan = (scanAction: "check-in" | "check-out") => {
+    if (isWeChatEnv && sdkReady) {
+      handleWeChatScan(scanAction)
+    } else {
+      handleMockScan(scanAction)
+    }
+  }
+
   const resetScan = () => {
     setScanStatus("idle")
     setScannedInstrument(null)
@@ -90,6 +197,20 @@ export function ScanInterface() {
       </div>
 
       <div className="flex-1 p-4 space-y-4">
+        {!isWeChatEnv && (
+          <Card className="bg-amber-50 border-amber-200">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-amber-900">非微信环境</p>
+                  <p className="text-amber-700 mt-1">当前使用模拟扫码功能，请在微信中打开以使用真实扫码</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {scanStatus === "idle" && (
           <>
             <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
@@ -97,7 +218,9 @@ export function ScanInterface() {
                 <div className="w-32 h-32 mx-auto mb-4 bg-white rounded-2xl flex items-center justify-center">
                   <QrCode className="w-20 h-20 text-primary" />
                 </div>
-                <p className="text-sm text-muted-foreground">请选择操作类型后扫描仪器二维码</p>
+                <p className="text-sm text-muted-foreground">
+                  {isWeChatEnv && sdkReady ? "点击按钮后扫描仪器二维码" : "请选择操作类型后扫描仪器二维码"}
+                </p>
               </CardContent>
             </Card>
 
@@ -126,7 +249,9 @@ export function ScanInterface() {
                 <Camera className="w-20 h-20 text-primary" />
               </div>
               <p className="text-lg font-medium">正在扫描...</p>
-              <p className="text-sm text-muted-foreground mt-2">请将二维码对准摄像头</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                {isWeChatEnv && sdkReady ? "请将二维码对准摄像头" : "模拟扫码中..."}
+              </p>
             </CardContent>
           </Card>
         )}
@@ -194,6 +319,7 @@ export function ScanInterface() {
             <p>2. 扫码上机后系统开始计时</p>
             <p>3. 使用完毕后请及时扫码下机</p>
             <p>4. 超时使用将产生额外费用</p>
+            {isWeChatEnv && <p className="text-primary">5. 当前使用微信扫码功能</p>}
           </CardContent>
         </Card>
       </div>

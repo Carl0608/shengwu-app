@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "export": "npm run build  && mv out dist",
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start"

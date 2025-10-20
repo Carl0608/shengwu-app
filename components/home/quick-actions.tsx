@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Search, Calendar, Send, QrCode, FileText, Settings } from "lucide-react"
+import { Search, Calendar, Send, QrCode, FileText, Settings, User, Activity } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { useAppStore } from "@/lib/store"
 
@@ -15,6 +15,8 @@ const userActions = [
 const adminActions = [
   { icon: FileText, label: "审核管理", href: "/admin/reviews", color: "text-red-600" },
   { icon: Settings, label: "系统管理", href: "/admin/settings", color: "text-gray-600" },
+  { icon: User, label: "用户管理", href: "/admin/users", color: "text-blue-600" },
+  { icon: Activity, label: "仪器管理", href: "/admin/instruments", color: "text-green-600" },
 ]
 
 export function QuickActions() {

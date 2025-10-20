@@ -2,7 +2,6 @@ import { MobileLayout } from "@/components/mobile-layout"
 import { InstrumentSearch } from "@/components/instruments/instrument-search"
 import { InstrumentList } from "@/components/instruments/instrument-list"
 
-
 export default function InstrumentsPage() {
   return (
     <MobileLayout>
